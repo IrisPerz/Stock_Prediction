@@ -132,7 +132,7 @@ def display_explanation(input_df, session, aws_bucket):
     
     st.subheader("🔍 Decision Transparency (SHAP)")
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(10, 4)
+    fig, ax = plt.subplots(figsize=(10, 4))
     shap.plots.waterfall(shap_values[0], show=False)
     st.pyplot(fig)
     # top feature
