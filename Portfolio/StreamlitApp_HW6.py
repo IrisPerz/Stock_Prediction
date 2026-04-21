@@ -131,14 +131,16 @@ def display_explanation(input_df, session, aws_bucket):
     shap_values = explainer(input_df_transformed)
     
     st.subheader("🔍 Decision Transparency (SHAP)")
-    fig, ax = plt.subplots(figsize=(10, 4))
-   shap.plots.waterfall(shap_values[0])
-top_feature = pd.Series(
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(10, 4)
+    shap.plots.waterfall(shap_values[0], show=False)
+    st.pyplot(fig)
+    # top feature
+    top_feature = pd.Series(
     shap_values[0].values,
-    index=shap_values[0].feature_names
-).abs().idxmax()
-    top_feature = pd.Series(shap_values[0, :, 0].values, index=shap_values[0, :, 0].feature_names).abs().idxmax()
-    st.info(f"**Business Insight:** The most influential factor in this decision was **{top_feature}**.")
+    index=shap_values[0].feature_names).abs().idxmax()
+
+st.info(f"**Business Insight:** The most influential factor in this decision was **{top_feature}**.")
 
 
 # Streamlit UI
