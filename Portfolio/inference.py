@@ -11,13 +11,17 @@ def model_fn(model_dir):
     return model
 
 def input_fn(request_body, request_content_type):
-    if request_content_type == 'application/x-npy':
-        data = np.load(BytesIO(request_body), allow_pickle=True)
-        return pd.DataFrame(data)
-    elif request_content_type == 'application/json':
-        return pd.read_json(request_body)
+    if request_content_type == 'application/json':
+        data = json.loads(request_body)
+        if isinstance(data, list):
+            return pd.DataFrame(data)
+        elif isinstance(data, dict):
+            return pd.DataFrame([data])
     elif request_content_type == 'text/csv':
         return pd.read_csv(StringIO(request_body))
+    elif request_content_type == 'application/x-npy':
+        data = np.load(BytesIO(request_body), allow_pickle=True)
+        return pd.DataFrame(data)
     else:
         raise ValueError(f"Unsupported content type: {request_content_type}")
 
