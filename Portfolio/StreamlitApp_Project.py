@@ -23,14 +23,13 @@ project_root = os.path.abspath(os.path.join(current_dir, '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# FIX 1: removed the drop Unnamed column line since your X_train won't have it
 file_path = os.path.join(current_dir, 'X_train.csv')
 dataset = pd.read_csv(file_path)
 
-aws_id = st.secrets["aws_credentials"]["AWS_ACCESS_KEY_ID"]
-aws_secret = st.secrets["aws_credentials"]["AWS_SECRET_ACCESS_KEY"]
-aws_token = st.secrets["aws_credentials"]["AWS_SESSION_TOKEN"]
-aws_bucket = st.secrets["aws_credentials"]["AWS_BUCKET"]
+aws_id       = st.secrets["aws_credentials"]["AWS_ACCESS_KEY_ID"]
+aws_secret   = st.secrets["aws_credentials"]["AWS_SECRET_ACCESS_KEY"]
+aws_token    = st.secrets["aws_credentials"]["AWS_SESSION_TOKEN"]
+aws_bucket   = st.secrets["aws_credentials"]["AWS_BUCKET"]
 aws_endpoint = st.secrets["aws_credentials"]["AWS_ENDPOINT"]
 
 @st.cache_resource
@@ -42,13 +41,12 @@ def get_session(aws_id, aws_secret, aws_token):
         region_name='us-east-1'
     )
 
-session = get_session(aws_id, aws_secret, aws_token)
+session    = get_session(aws_id, aws_secret, aws_token)
 sm_session = sagemaker.Session(boto_session=session)
 
 MODEL_INFO = {
     "endpoint"  : aws_endpoint,
     "explainer" : "explainer_loan.shap",
-    # FIX 2: changed model.tar.gz to finalized_loan_model.tar.gz to match your notebook
     "pipeline"  : "finalized_loan_model.tar.gz",
     "keys"      : ['loan_amnt', 'int_rate', 'annual_inc', 'dti'],
     "inputs"    : [
@@ -61,7 +59,7 @@ MODEL_INFO = {
 
 def load_pipeline(_session, bucket, key):
     s3_client = _session.client('s3')
-    filename = MODEL_INFO["pipeline"]
+    filename  = MODEL_INFO["pipeline"]
     s3_client.download_file(
         Filename=filename,
         Bucket=bucket,
@@ -79,7 +77,7 @@ def load_shap_explainer(_session, bucket, key, local_path):
     with open(local_path, "rb") as f:
         return load(f)
 
-def call_model_api(input_df):
+def call_model_api(input_data):
     predictor = Predictor(
         endpoint_name=MODEL_INFO["endpoint"],
         sagemaker_session=sm_session,
@@ -87,11 +85,10 @@ def call_model_api(input_df):
         deserializer=NumpyDeserializer()
     )
     try:
-        raw_pred = predictor.predict(input_df)
+        raw_pred = predictor.predict(input_data)
         pred_val = pd.DataFrame(raw_pred).values[-1][0]
-        # FIX 3: removed extra } that was causing a syntax error
-        mapping = {0: "✅ Fully Paid", 1: "⚠️ Charged Off (Default)"}
-        return mapping.get(pred_val), 200
+        mapping  = {0: "✅ Fully Paid", 1: "⚠️ Charged Off (Default)"}
+        return mapping.get(int(pred_val)), 200
     except Exception as e:
         return f"Error: {str(e)}", 500
 
@@ -102,18 +99,17 @@ def display_explanation(input_df, session, aws_bucket):
         posixpath.join('explainer', explainer_name),
         os.path.join(tempfile.gettempdir(), explainer_name)
     )
-    best_pipeline = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
-    imputer = best_pipeline.named_steps['imputer']
-    scaler  = best_pipeline.named_steps['scaler']
-    input_df = pd.DataFrame(input_df)
+    best_pipeline        = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
+    imputer              = best_pipeline.named_steps['imputer']
+    scaler               = best_pipeline.named_steps['scaler']
+    input_df             = pd.DataFrame(input_df)
     input_df_transformed = scaler.transform(imputer.transform(input_df))
-    feature_names = dataset.columns.tolist()
+    feature_names        = dataset.columns.tolist()
     input_df_transformed = pd.DataFrame(input_df_transformed, columns=feature_names)
-    shap_values = explainer(input_df_transformed)
+    shap_values          = explainer(input_df_transformed)
 
     st.subheader("🔍 Decision Transparency (SHAP)")
     fig, ax = plt.subplots(figsize=(10, 4))
-    # FIX 4: removed [0, :, 1] indexing that caused errors — use [0] directly
     shap.plots.waterfall(shap_values[0], max_display=12)
     st.pyplot(fig)
     top_feature = pd.Series(
@@ -127,7 +123,7 @@ st.title("💳 Loan Default Predictor — LendingClub")
 
 with st.form("pred_form"):
     st.subheader("Inputs")
-    cols = st.columns(2)
+    cols        = st.columns(2)
     user_inputs = {}
 
     for i, inp in enumerate(MODEL_INFO["inputs"]):
@@ -142,11 +138,17 @@ with st.form("pred_form"):
 
     submitted = st.form_submit_button("Run Prediction")
 
-original = dataset.iloc[0:1].to_dict()
-original.update(user_inputs)
+# Build full input row from X_train, then override with user inputs
+original = dataset.iloc[0:1].copy()
+for key, value in user_inputs.items():
+    if key in original.columns:
+        original[key] = value
+
+# Convert to list of dicts for JSON serialization
+input_data = original.to_dict(orient='records')
 
 if submitted:
-    res, status = call_model_api(original)
+    res, status = call_model_api(input_data)
     if status == 200:
         st.metric("Prediction Result", res)
         display_explanation(original, session, aws_bucket)
