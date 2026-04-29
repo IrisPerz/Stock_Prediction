@@ -8,13 +8,9 @@ import joblib
 import tarfile
 import tempfile
 import boto3
-import sagemaker
-from sagemaker.predictor import Predictor
-from sagemaker.serializers import JSONSerializer
-from sagemaker.deserializers import NumpyDeserializer
-from sklearn.pipeline import Pipeline
+import json
 import shap
-from joblib import dump, load
+from joblib import load
 
 warnings.simplefilter("ignore")
 
@@ -41,116 +37,10 @@ def get_session(aws_id, aws_secret, aws_token):
         region_name='us-east-1'
     )
 
-session    = get_session(aws_id, aws_secret, aws_token)
-sm_session = sagemaker.Session(boto_session=session)
+session = get_session(aws_id, aws_secret, aws_token)
 
 MODEL_INFO = {
     "endpoint"  : aws_endpoint,
     "explainer" : "explainer_loan.shap",
     "pipeline"  : "finalized_loan_model.tar.gz",
-    "keys"      : ['loan_amnt', 'int_rate', 'annual_inc', 'dti'],
-    "inputs"    : [
-        {"name": "loan_amnt",  "min": 500.0,   "max": 40000.0,  "default": 10000.0, "step": 500.0},
-        {"name": "int_rate",   "min": 5.0,     "max": 30.0,     "default": 13.5,    "step": 0.1},
-        {"name": "annual_inc", "min": 10000.0, "max": 500000.0, "default": 55000.0, "step": 1000.0},
-        {"name": "dti",        "min": 0.0,     "max": 50.0,     "default": 18.5,    "step": 0.1}
-    ]
-}
-
-def load_pipeline(_session, bucket, key):
-    s3_client = _session.client('s3')
-    filename  = MODEL_INFO["pipeline"]
-    s3_client.download_file(
-        Filename=filename,
-        Bucket=bucket,
-        Key=f"{key}/{os.path.basename(filename)}"
-    )
-    with tarfile.open(filename, "r:gz") as tar:
-        tar.extractall(path=".")
-        joblib_file = [f for f in tar.getnames() if f.endswith('.joblib')][0]
-    return joblib.load(f"{joblib_file}")
-
-def load_shap_explainer(_session, bucket, key, local_path):
-    s3_client = _session.client('s3')
-    if not os.path.exists(local_path):
-        s3_client.download_file(Filename=local_path, Bucket=bucket, Key=key)
-    with open(local_path, "rb") as f:
-        return load(f)
-
-def call_model_api(input_data):
-    predictor = Predictor(
-        endpoint_name=MODEL_INFO["endpoint"],
-        sagemaker_session=sm_session,
-        serializer=JSONSerializer(),
-        deserializer=NumpyDeserializer()
-    )
-    try:
-        raw_pred = predictor.predict(input_data)
-        pred_val = pd.DataFrame(raw_pred).values[-1][0]
-        mapping  = {0: "✅ Fully Paid", 1: "⚠️ Charged Off (Default)"}
-        return mapping.get(int(pred_val)), 200
-    except Exception as e:
-        return f"Error: {str(e)}", 500
-
-def display_explanation(input_df, session, aws_bucket):
-    explainer_name = MODEL_INFO["explainer"]
-    explainer = load_shap_explainer(
-        session, aws_bucket,
-        posixpath.join('explainer', explainer_name),
-        os.path.join(tempfile.gettempdir(), explainer_name)
-    )
-    best_pipeline        = load_pipeline(session, aws_bucket, 'sklearn-pipeline-deployment')
-    imputer              = best_pipeline.named_steps['imputer']
-    scaler               = best_pipeline.named_steps['scaler']
-    input_df             = pd.DataFrame(input_df)
-    input_df_transformed = scaler.transform(imputer.transform(input_df))
-    feature_names        = dataset.columns.tolist()
-    input_df_transformed = pd.DataFrame(input_df_transformed, columns=feature_names)
-    shap_values          = explainer(input_df_transformed)
-
-    st.subheader("🔍 Decision Transparency (SHAP)")
-    fig, ax = plt.subplots(figsize=(10, 4))
-    shap.plots.waterfall(shap_values[0], max_display=12)
-    st.pyplot(fig)
-    top_feature = pd.Series(
-        shap_values[0].values,
-        index=shap_values[0].feature_names
-    ).abs().idxmax()
-    st.info(f"**Business Insight:** The most influential factor in this decision was **{top_feature}**.")
-
-st.set_page_config(page_title="Loan Default Predictor", layout="wide")
-st.title("💳 Loan Default Predictor — LendingClub")
-
-with st.form("pred_form"):
-    st.subheader("Inputs")
-    cols        = st.columns(2)
-    user_inputs = {}
-
-    for i, inp in enumerate(MODEL_INFO["inputs"]):
-        with cols[i % 2]:
-            user_inputs[inp['name']] = st.number_input(
-                inp['name'].replace('_', ' ').upper(),
-                min_value=inp['min'],
-                max_value=inp['max'],
-                value=inp['default'],
-                step=inp['step']
-            )
-
-    submitted = st.form_submit_button("Run Prediction")
-
-# Build full input row from X_train, then override with user inputs
-original = dataset.iloc[0:1].copy()
-for key, value in user_inputs.items():
-    if key in original.columns:
-        original[key] = value
-
-# Convert to list of dicts for JSON serialization
-input_data = original.to_dict(orient='records')
-
-if submitted:
-    res, status = call_model_api(input_data)
-    if status == 200:
-        st.metric("Prediction Result", res)
-        display_explanation(original, session, aws_bucket)
-    else:
-        st.error(res)
+    "keys"      : ['l
